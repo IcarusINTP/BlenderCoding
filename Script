@@ -1,0 +1,96 @@
+import bpy
+import requests
+
+# === Binance API Configuration ===
+BINANCE_API_URL = "https://api.binance.com/api/v3/klines"
+SYMBOL = "BTCUSDT"  # Change to any trading pair
+INTERVAL = "1m"  # Timeframe: 1m, 5m, 15m, 1h, 4h, 1d
+LIMIT = 20  # Number of candlesticks to fetch
+
+# === Candlestick Settings ===
+CANDLE_WIDTH = 1.2  # Bulkier bars
+CANDLE_SPACING = 3.0  # More space between bars
+HEIGHT_SCALE = 0.1  # Reduce height variation
+BASE_HEIGHT = 1.5  # Ensure bars have a minimum height
+UPDATE_INTERVAL = 60  # Auto-refresh time (seconds)
+
+# === Fetch Crypto Data ===
+def fetch_crypto_data():
+    params = {"symbol": SYMBOL, "interval": INTERVAL, "limit": LIMIT}
+    response = requests.get(BINANCE_API_URL, params=params)
+
+    if response.status_code == 200:
+        data = response.json()
+        candles = []
+        for entry in data:
+            open_price = float(entry[1])
+            close_price = float(entry[4])
+            candles.append((open_price, close_price))
+        return candles
+    else:
+        print("❌ Error fetching data:", response.status_code)
+        return []
+
+# === Function to Create a Bulkier Candlestick with Animation ===
+def create_candlestick(index, open_price, close_price):
+    x_pos = index * CANDLE_SPACING  # Position along X-axis
+    y_pos = 0  # Keep Y-axis centered
+
+    # Determine color (Green = Bullish, Red = Bearish)
+    is_bullish = close_price > open_price
+    color = (0, 1, 0, 1) if is_bullish else (1, 0, 0, 1)  # Green or Red
+
+    # Even out vertical difference
+    height = max(abs(close_price - open_price) * HEIGHT_SCALE, BASE_HEIGHT)  
+    z_pos = height / 2  # Center the bar properly
+
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x_pos, y_pos, 0))  # Start at base
+    candle = bpy.context.object
+    candle.scale.x = CANDLE_WIDTH / 2  # Thicker bar
+    candle.scale.y = CANDLE_WIDTH / 2
+    candle.scale.z = 0  # Start with zero height
+    candle.name = f"Candle_{index}"
+
+    # Create material and apply color
+    mat = bpy.data.materials.new(name=f"CandleMaterial_{index}")
+    mat.diffuse_color = color
+    candle.data.materials.append(mat)
+
+    # Animate Growth (Keyframes)
+    candle.keyframe_insert(data_path="scale", frame=bpy.context.scene.frame_current)  # Start small
+    candle.scale.z = height / 2  # Final size
+    candle.keyframe_insert(data_path="scale", frame=bpy.context.scene.frame_current + 10)  # Grow over 10 frames
+
+# === Function to Refresh Scene & Update Candlesticks ===
+def update_chart():
+    print("🔄 Fetching New Data...")
+    price_data = fetch_crypto_data()
+
+    # Clear existing objects except the grid
+    for obj in bpy.context.scene.objects:
+        if obj.name.startswith("Candle_"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    # Create the bulkier candlesticks (No Wicks)
+    for i, (open_price, close_price) in enumerate(price_data):
+        create_candlestick(i, open_price, close_price)
+
+    print("✅ 3D Candlestick Chart Updated!")
+    
+    # Schedule next update
+    return UPDATE_INTERVAL  # Blender’s timer system will call this function every 60 sec
+
+# === Main Execution ===
+# Clear existing objects in the scene
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+
+# Create Grid (Reference)
+bpy.ops.mesh.primitive_plane_add(size=LIMIT * CANDLE_SPACING, location=(LIMIT * CANDLE_SPACING / 2, 0, -0.1))
+grid = bpy.context.object
+grid.name = "Grid"
+
+# Start Auto-Refresh using Blender's Timer System
+bpy.app.timers.register(update_chart, first_interval=5)
+
+print("🚀 Real-Time Candlestick Chart Running in Blender!")
